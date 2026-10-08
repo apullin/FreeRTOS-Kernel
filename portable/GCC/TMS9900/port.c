@@ -80,9 +80,14 @@ StackType_t * pxPortInitialiseStack( StackType_t * pxTopOfStack,
     StackType_t * pxSP;
     int i;
 
-    /* Workspace occupies the top 16 words of the allocation.
-     * pxTopOfStack points to the highest usable address. */
-    pxWorkspace = pxTopOfStack - 15;
+    /* pxTopOfStack is the highest usable word, not a one-past-end pointer.
+     * Reserve all 16 registers, then round their base down to the C stack
+     * boundary. Merely aligning pxTopOfStack leaves (top - 15) two bytes
+     * misaligned. At most one additional word of padding is consumed. The
+     * data stack restored into R10 starts at this workspace base. */
+    pxWorkspace = ( StackType_t * )
+        ( ( uintptr_t ) ( pxTopOfStack - 15 ) &
+          ~( ( uintptr_t ) portBYTE_ALIGNMENT - 1U ) );
 
     /* Clear workspace (all registers = 0) */
     for( i = 0; i < 16; i++ )

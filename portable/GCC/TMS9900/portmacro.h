@@ -48,8 +48,10 @@ typedef unsigned int     UBaseType_t;
  * LIMI 0 disables all maskable interrupts.
  * LIMI 2 enables interrupts at levels 0-2 (tick is level 1).
  *-----------------------------------------------------------*/
-#define portDISABLE_INTERRUPTS()    __asm__ volatile ( "LIMI 0" )
-#define portENABLE_INTERRUPTS()     __asm__ volatile ( "LIMI 2" )
+/* Interrupt entry can observe ordinary shared memory, so prevent the compiler
+ * from moving accesses across either mask change. LIMI also changes ST. */
+#define portDISABLE_INTERRUPTS()    __asm__ volatile ( "LIMI 0" ::: "memory", "cc" )
+#define portENABLE_INTERRUPTS()     __asm__ volatile ( "LIMI 2" ::: "memory", "cc" )
 
 /*-----------------------------------------------------------
  * Critical section control macros.
@@ -88,7 +90,8 @@ extern void vPortYield( void ) __attribute__( ( naked ) );
 /*-----------------------------------------------------------
  * Hardware specifics.
  *-----------------------------------------------------------*/
-#define portBYTE_ALIGNMENT    2
+/* Match the backend's four-byte R10 boundary, including initial task frames. */
+#define portBYTE_ALIGNMENT    4
 #define portSTACK_GROWTH      ( -1 )
 #define portTICK_PERIOD_MS    ( ( TickType_t ) 1000 / configTICK_RATE_HZ )
 
