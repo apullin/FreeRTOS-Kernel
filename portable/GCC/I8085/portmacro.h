@@ -53,11 +53,22 @@ typedef unsigned int     UBaseType_t;
 /*-----------------------------------------------------------
  * Interrupt control macros.
  *
- * 8085 DI disables all maskable interrupts.
+ * 8085 DI disables all maskable interrupts (global IE flip-flop).
  * 8085 EI enables all maskable interrupts.
+ *
+ * The 8085 also has per-source masking via SIM/RIM for RST 5.5,
+ * RST 6.5, and RST 7.5. The per-task interrupt mask is saved
+ * and restored as part of the context switch (see portasm.S).
+ * This means each task retains its own RST x.5 mask state.
+ *
+ * Critical sections use DI/EI (not SIM) so that ALL maskable
+ * interrupts are blocked during kernel operations. This is the
+ * safe default -- if a user adds RST 5.5 or RST 7.5 ISRs that
+ * call FreeRTOS "FromISR" APIs, those interrupts are properly
+ * blocked during critical sections.
  *-----------------------------------------------------------*/
-#define portDISABLE_INTERRUPTS()    __asm__ volatile ( "di" )
-#define portENABLE_INTERRUPTS()     __asm__ volatile ( "ei" )
+#define portDISABLE_INTERRUPTS()    __asm__ volatile ( "di" ::: "memory" )
+#define portENABLE_INTERRUPTS()     __asm__ volatile ( "ei" ::: "memory" )
 
 /*-----------------------------------------------------------
  * Critical section control.

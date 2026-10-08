@@ -1,12 +1,19 @@
 ; ---------------------------------------------------------------------------
 ; FreeRTOS Intel 8085 port - context switch assembly
 ;
-; Context frame on the task's stack (8 bytes, from low to high address):
-;   [L] [H] [E] [D] [C] [B] [Flags] [A] [PC_lo] [PC_hi] ...
+; Saved registers (10 bytes), followed by the 2-byte return PC:
+;   [xx] [IntMask] [L] [H] [E] [D] [C] [B] [Flags] [A] [PC_lo] [PC_hi]
 ;   ^--- pxTopOfStack (SP) points here
 ;
-; The order matches: PUSH H, PUSH D, PUSH B, PUSH PSW (each pushes high
-; byte first). Restore is: POP PSW, POP B, POP D, POP H, then RET.
+; The bottom 2 bytes are the 8085-specific interrupt mask, saved via
+; RIM and restored via SIM. This allows each task to have its own
+; RST 5.5/6.5/7.5 mask state, preserved across context switches.
+;
+; The SIM byte format stored is: [0 0 0 0 MSE=1 M7.5 M6.5 M5.5]
+; On restore, POP PSW loads A = SIM byte, then SIM applies it.
+;
+; The order is: PUSH PSW (regs), PUSH B, PUSH D, PUSH H, RIM+PUSH PSW (mask).
+; Restore is: POP PSW (mask)+SIM, POP H, POP D, POP B, POP PSW (regs), RET.
 ;
 ; pxCurrentTCB->pxTopOfStack is the first field of the TCB, a 16-bit
 ; pointer stored little-endian (low byte at lower address).
@@ -38,6 +45,10 @@ vPortStartFirstTask:
     XCHG                    ; HL = saved SP
     SPHL                    ; SP = task's saved stack pointer
 
+    ; Restore 8085 interrupt mask (per-task SIM state)
+    POP PSW                 ; A = prepared SIM byte
+    SIM                     ; Apply per-task interrupt mask
+
     ; Restore registers from the task's stack frame
     POP H                   ; Restore HL
     POP D                   ; Restore DE
@@ -59,12 +70,21 @@ vPortStartFirstTask:
 ; ---------------------------------------------------------------------------
     .globl vPortYield
 vPortYield:
+    DI                      ; Protect task context before changing SP or TCB
     ; Return address already on stack from CALL
     ; Save all registers
     PUSH PSW                ; Save A + flags
     PUSH B                  ; Save BC
     PUSH D                  ; Save DE
     PUSH H                  ; Save HL
+
+    ; Save 8085 interrupt mask (per-task state)
+    ; RIM returns: [SID I7.5p I6.5p I5.5p IE M7.5 M6.5 M5.5]
+    ; We prepare a SIM byte: [0 0 0 0 MSE=1 M7.5 M6.5 M5.5]
+    RIM                     ; Read current interrupt mask
+    ANI 0x07                ; Keep only mask bits (M7.5, M6.5, M5.5)
+    ORI 0x08                ; Set MSE=1 (mask set enable for SIM)
+    PUSH PSW                ; Save prepared SIM byte
 
     ; --- Save SP to current TCB ---
     ; HL = current SP
@@ -95,6 +115,10 @@ vPortYield:
     XCHG                    ; HL = saved SP
     SPHL                    ; SP = new task's stack pointer
 
+    ; Restore 8085 interrupt mask (per-task SIM state)
+    POP PSW                 ; A = prepared SIM byte
+    SIM                     ; Apply per-task interrupt mask
+
     POP H                   ; Restore HL
     POP D                   ; Restore DE
     POP B                   ; Restore BC
@@ -122,6 +146,12 @@ vPortTickISR:
     PUSH B                  ; Save BC
     PUSH D                  ; Save DE
     PUSH H                  ; Save HL
+
+    ; Save 8085 interrupt mask (per-task state)
+    RIM                     ; Read current interrupt mask
+    ANI 0x07                ; Keep only mask bits
+    ORI 0x08                ; Set MSE=1 for SIM format
+    PUSH PSW                ; Save prepared SIM byte
 
     ; --- Save SP to current TCB ---
     LXI H, 0
@@ -155,6 +185,10 @@ vPortTickISR:
     MOV D, M                ; D = high byte of saved SP
     XCHG                    ; HL = saved SP
     SPHL                    ; SP = task's stack pointer
+
+    ; Restore 8085 interrupt mask (per-task SIM state)
+    POP PSW                 ; A = prepared SIM byte
+    SIM                     ; Apply per-task interrupt mask
 
     POP H                   ; Restore HL
     POP D                   ; Restore DE

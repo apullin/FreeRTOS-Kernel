@@ -15,7 +15,12 @@
  *   [B]                 [C]                  ; BC pair (pushed by PUSH B)
  *   [D]                 [E]                  ; DE pair (pushed by PUSH D)
  *   [H]                 [L]                  ; HL pair (pushed by PUSH H)
+ *   [IntMask]           [xx]                 ; 8085 interrupt mask (via RIM/SIM)
  *                         ^--- pxTopOfStack points here
+ *
+ * The IntMask byte is a prepared SIM value: [0 0 0 0 MSE M7.5 M6.5 M5.5].
+ * On context restore, POP PSW loads it into A, then SIM applies it.
+ * This gives each task its own RST 5.5/6.5/7.5 mask state.
  *
  * 8085 PUSH pushes high byte first (at SP-1), then low byte (at SP-2).
  * After a PUSH, SP points to the low byte.
@@ -106,7 +111,14 @@ StackType_t * pxPortInitialiseStack( StackType_t * pxTopOfStack,
 
     /* HL pair: PUSH H pushes H at SP-1, L at SP-2 */
     *pxTopOfStack-- = ( StackType_t ) 0x00;   /* H */
-    *pxTopOfStack   = ( StackType_t ) 0x00;   /* L (don't decrement - return this) */
+    *pxTopOfStack-- = ( StackType_t ) 0x00;   /* L */
+
+    /* 8085 interrupt mask (saved via PUSH PSW after RIM processing).
+     * Format: [0 0 0 0 MSE=1 M7.5 M6.5 M5.5]
+     * Initial value 0x0D = MSE=1, M7.5=masked, M6.5=unmasked (tick), M5.5=masked.
+     * Matches the startup.S SIM configuration. */
+    *pxTopOfStack-- = ( StackType_t ) 0x0D;   /* A = SIM byte (interrupt mask) */
+    *pxTopOfStack   = ( StackType_t ) 0x00;   /* Flags (don't care, pad for PUSH PSW) */
 
     return pxTopOfStack;
 }
